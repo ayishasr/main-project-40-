@@ -1,0 +1,92 @@
+import joblib
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from tensorflow.keras.utils import to_categorical
+import tensorflow as tf
+
+# Load the training and testing data from CSV files
+train_data = pd.read_csv('/content/train_all_letters.csv')
+test_data = pd.read_csv('/content/test_all_letters.csv')
+
+# Identify feature columns and label column
+feature_columns = ['flex_1', 'flex_2', 'flex_3', 'flex_4', 'flex_5', 'Qw', 'Qx', 'Qy', 'Qz',
+                   'GYRx', 'GYRy', 'GYRz', 'ACCx', 'ACCy', 'ACCz', 'ACCx_body',
+                   'ACCy_body', 'ACCz_body', 'ACCx_world', 'ACCy_world', 'ACCz_world']
+label_column = 'LETTER'
+
+# Convert columns to numeric, coercing errors to NaN, and drop NaN rows
+for col in feature_columns:
+    train_data[col] = pd.to_numeric(train_data[col], errors='coerce')
+    test_data[col] = pd.to_numeric(test_data[col], errors='coerce')
+train_data = train_data.dropna(subset=feature_columns)
+test_data = test_data.dropna(subset=feature_columns)
+
+# Preprocess features
+scaler = StandardScaler()
+X_train = scaler.fit_transform(train_data[feature_columns].values)
+X_test = scaler.transform(test_data[feature_columns].values)
+joblib.dump(scaler, 'scaler.pkl')
+
+# Label encoding and one-hot encoding for gestures
+label_encoder = LabelEncoder()
+y_train = to_categorical(label_encoder.fit_transform(train_data[label_column]))
+y_test = to_categorical(label_encoder.transform(test_data[label_column]))
+
+# Reshape X for LSTM input (samples, timesteps, features)
+sequence_length = 150  # Number of timesteps in each sequence
+X_train_seq = []
+y_train_seq = []
+X_test_seq = []
+y_test_seq = []
+
+for i in range(0, len(X_train) - sequence_length + 1, sequence_length):
+    X_train_seq.append(X_train[i:i + sequence_length])
+    y_train_seq.append(y_train[i + sequence_length - 1])  # Last label of the sequence
+
+for i in range(0, len(X_test) - sequence_length + 1, sequence_length):
+    X_test_seq.append(X_test[i:i + sequence_length])
+    y_test_seq.append(y_test[i + sequence_length - 1])
+
+X_train_seq = np.array(X_train_seq)
+y_train_seq = np.array(y_train_seq)
+X_test_seq = np.array(X_test_seq)
+y_test_seq = np.array(y_test_seq)
+
+# Build the LSTM model
+model = Sequential()
+model.add(LSTM(64, input_shape=(X_train_seq.shape[1], X_train_seq.shape[2])))
+model.add(Dense(y_train_seq.shape[1], activation='softmax'))
+
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+# Train the model
+model.fit(X_train_seq, y_train_seq, epochs=50, batch_size=32, validation_split=0.2)
+
+# Evaluate the model
+test_loss, test_acc = model.evaluate(X_test_seq, y_test_seq)
+print(f'Test Accuracy: {test_acc:.2f}')
+
+print(y_test[0])
+predicted = model.predict(X_test_seq[0].reshape(1, X_test_seq.shape[1], X_test_seq.shape[2]))
+pre_class = np.argmax(predicted)
+print(label_encoder.inverse_transform([pre_class]))
+# Convert the model to TensorFlow Lite format
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+converter.experimental_enable_resource_variables = True  # Enable resource variables
+converter.target_spec.supported_ops = [
+    tf.lite.OpsSet.TFLITE_BUILTINS,
+    tf.lite.OpsSet.SELECT_TF_OPS
+]
+converter._experimental_lower_tensor_list_ops = False
+
+tflite_model = converter.convert()
+
+# Save the TFLite model
+tflite_model_path = 'sign_language_model.tflite'
+with open(tflite_model_path, 'wb') as f:
+    f.write(tflite_model)
+
+print(f"Model converted and saved as '{tflite_model_path}'")
