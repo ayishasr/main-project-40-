@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Language Recognition</title>
+</head>
+<body>
+    <h1>Sign Language Recognition</h1>
+    <div>
+        <label for="input-box">Enter Input Features (comma-separated):</label>
+        <input type="text" id="input-box">
+    </div>
+
+    <div>
+        <label for="language">Select Language: </label>
+        <select id="language">
+            <option value="en">English</option>
+            <option value="fr">French</option>
+            <option value="ko">Korean</option>
+            <option value="zh-CN">Chinese</option>
+            <option value="ja">Japanese</option>
+            <option value="hi">Hindi</option>  
+            <option value="ml">Malayalam</option>    
+            <!-- Add more languages here -->
+        </select>
+    </div>
+
+    <button id="play-audio">Play Audio</button>
+
+    <div>
+        <h2>Recognized Text: <span id="recognized-text">Waiting for input...</span></h2>
+    </div>
+
+
+    <script>
+        document.getElementById('play-audio').addEventListener('click', () => {
+            const inputText = document.getElementById('input-box').value;
+            const language = document.getElementById('language').value;
+            fetch('/play_audio', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ language: language, input_features: inputText })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    console.error(data.error);
+                    return;
+                } 
+                else {
+                    document.getElementById('recognized-text').textContent = data.translated_text;
+                    
+                    // Request the audio file and play it
+                    const audio = new Audio("/get_audio?${new Date().getTime()}");
+                    console.log('got the audio');
+                    console.log(audio);
+                    audio.play().catch(error => console.error("Error playing audio:", error));
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+
+
