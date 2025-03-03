@@ -4,7 +4,7 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:scidart/numdart.dart'; // For standardization
+import 'package:flutter/services.dart' show rootBundle;
 
 void main() {
   runApp(SmartGloveApp());
@@ -63,8 +63,8 @@ class TranslationScreen extends StatefulWidget {
 class _TranslationScreenState extends State<TranslationScreen> {
   BluetoothConnection? connection;
   Interpreter? interpreter;
-  List<double> mean = [/* Add mean values from scaler */];
-  List<double> std = [/* Add std values from scaler */];
+  List<double> mean = [];
+  List<double> std = [];
   String predictedGesture = '';
   String translatedGesture = '';
   String selectedLanguage = 'English';
@@ -86,6 +86,7 @@ class _TranslationScreenState extends State<TranslationScreen> {
     super.initState();
     _initializeBluetooth();
     _loadModel();
+    _loadScaler();
   }
 
   Future<void> _initializeBluetooth() async {
@@ -103,6 +104,13 @@ class _TranslationScreenState extends State<TranslationScreen> {
 
   Future<void> _loadModel() async {
     interpreter = await Interpreter.fromAsset('assets/model.tflite');
+  }
+
+  Future<void> _loadScaler() async {
+    String jsonString = await rootBundle.loadString('assets/scaler.json');
+    Map<String, dynamic> scalerData = json.decode(jsonString);
+    mean = List<double>.from(scalerData['mean']);
+    std = List<double>.from(scalerData['std']);
   }
 
   void _onDataReceived(Uint8List data) {
