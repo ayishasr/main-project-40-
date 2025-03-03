@@ -1,0 +1,186 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'dart:convert';
+import 'dart:typed_data';
+import 'package:scidart/numdart.dart'; // For standardization
+
+void main() {
+  runApp(SmartGloveApp());
+}
+
+class SmartGloveApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Smart Glove App',
+      theme: ThemeData(primarySwatch: Colors.blue),
+      home: WelcomeScreen(),
+      debugShowCheckedModeBanner: false,
+    );
+  }
+}
+
+class WelcomeScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Smart Glove App'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              'Welcome to Smart Glove App',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => TranslationScreen()),
+                );
+              },
+              child: Text('Start Translation'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class TranslationScreen extends StatefulWidget {
+  @override
+  _TranslationScreenState createState() => _TranslationScreenState();
+}
+
+class _TranslationScreenState extends State<TranslationScreen> {
+  BluetoothConnection? connection;
+  Interpreter? interpreter;
+  List<double> mean = [/* Add mean values from scaler */];
+  List<double> std = [/* Add std values from scaler */];
+  String predictedGesture = '';
+  String translatedGesture = '';
+  String selectedLanguage = 'English';
+  FlutterTts flutterTts = FlutterTts();
+  final List<String> languages = ['English', 'Spanish', 'Hindi'];
+
+  final List<String> gestureClasses = [
+    'A', 'B', 'BAD', 'C', 'D', 'DEAF', 'E', 'F', 'FINE', 'G', 'GOOD', 'GOODBYE',
+    'H', 'HELLO', 'HUNGRY', 'I', 'J', 'K', 'L', 'M', 'ME', 'N', 'NO', 'O', 'P',
+    'PLEASE', 'Q', 'R', 'S', 'SORRY', 'T', 'THANK YOU', 'U', 'V', 'W', 'X', 'Y',
+    'YES', 'YOU', 'Z'
+  ];
+
+  List<List<double>> sequenceBuffer = [];
+  final int sequenceLength = 10;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeBluetooth();
+    _loadModel();
+  }
+
+  Future<void> _initializeBluetooth() async {
+    try {
+      List<BluetoothDevice> devices = await FlutterBluetoothSerial.instance.getBondedDevices();
+      BluetoothDevice? hc05 = devices.firstWhere((device) => device.name == "HC-05", orElse: () => BluetoothDevice(address: ""));
+      if (hc05.address.isNotEmpty) {
+        connection = await BluetoothConnection.toAddress(hc05.address);
+        connection!.input!.listen(_onDataReceived);
+      }
+    } catch (e) {
+      print("Bluetooth Error: $e");
+    }
+  }
+
+  Future<void> _loadModel() async {
+    interpreter = await Interpreter.fromAsset('assets/model.tflite');
+  }
+
+  void _onDataReceived(Uint8List data) {
+    String rawData = utf8.decode(data);
+    List<double> sensorValues = rawData.split(',').map((e) => double.tryParse(e) ?? 0.0).toList();
+    _processInput(sensorValues);
+  }
+
+  void _processInput(List<double> input) {
+    List<double> standardizedInput = _standardizeInput(input);
+    if (sequenceBuffer.length >= sequenceLength) {
+      sequenceBuffer.removeAt(0);
+    }
+    sequenceBuffer.add(standardizedInput);
+    if (sequenceBuffer.length == sequenceLength) {
+      _predictGesture();
+    }
+  }
+
+  List<double> _standardizeInput(List<double> input) {
+    if (input.length != mean.length || input.length != std.length) return input;
+    return List.generate(input.length, (i) => (input[i] - mean[i]) / std[i]);
+  }
+
+  void _predictGesture() {
+    var inputTensor = [sequenceBuffer];
+    var outputTensor = List.filled(1, List.filled(gestureClasses.length, 0.0));
+    interpreter!.run(inputTensor, outputTensor);
+    int predictedIndex = outputTensor[0].indexOf(outputTensor[0].reduce((a, b) => a > b ? a : b));
+    setState(() {
+      predictedGesture = gestureClasses[predictedIndex];
+      translatedGesture = _translateGesture(predictedGesture);
+    });
+    _speakGesture(translatedGesture);
+  }
+
+  String _translateGesture(String gesture) {
+    if (selectedLanguage == 'English') return gesture;
+    return '$gesture in $selectedLanguage';
+  }
+
+  Future<void> _speakGesture(String text) async {
+    await flutterTts.setLanguage(selectedLanguage == 'Spanish' ? 'es-ES' : selectedLanguage == 'Hindi' ? 'hi-IN' : 'en-US');
+    await flutterTts.speak(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Translation Screen')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Predicted Gesture:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            SizedBox(height: 10),
+            Container(
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(8)),
+              child: Text(translatedGesture, style: TextStyle(fontSize: 16)),
+            ),
+            SizedBox(height: 20),
+            Text('Select Language:', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            SizedBox(height: 10),
+            DropdownButton<String>(
+              value: selectedLanguage,
+              items: languages.map((String language) => DropdownMenuItem(value: language, child: Text(language))).toList(),
+              onChanged: (String? newLanguage) {
+                setState(() {
+                  selectedLanguage = newLanguage!;
+                  translatedGesture = _translateGesture(predictedGesture);
+                });
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
